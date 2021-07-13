@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-
 """
 Benchmark test for single deployment at 1k no-op replica scale.
 
@@ -107,6 +106,7 @@ def run_one_trial(trail_length: str, num_connectionss) -> None:
 
     return out.decode()
 
+
 def shutdown_cluster():
     pass
 
@@ -116,12 +116,8 @@ def shutdown_cluster():
 @click.option("--num-trials", type=int, default=DEFAULT_NUM_TRIALS)
 @click.option("--trial-length", type=str, default=DEFAULT_TRAIL_LENGTH)
 @click.option("--max-batch-size", type=int, default=DEFAULT_MAX_BATCH_SIZE)
-def main(
-    num_replicas: Optional[int],
-    num_trials: Optional[int],
-    trial_length: Optional[str],
-    max_batch_size: Optional[int]
-):
+def main(num_replicas: Optional[int], num_trials: Optional[int],
+         trial_length: Optional[str], max_batch_size: Optional[int]):
     num_nodes = int(math.ceil(DEFAULT_NUM_REPLICA / NUM_CPU_PER_NODE))
     print(f"\n\nSetting up ray cluster with {num_nodes} nodes ....\n\n")
     setup_cluster(num_nodes)
@@ -129,7 +125,7 @@ def main(
     print(f"\n\nDeploying with {num_replicas} target replicas ....\n\n")
     deploy_replicas(num_replicas, max_batch_size)
 
-    print(f"\n\nWarming up cluster ....\n\n")
+    print("\n\nWarming up cluster ....\n\n")
     warm_up_cluster(5)
 
     final_result = []
@@ -138,8 +134,9 @@ def main(
         decoded_out = run_one_trial(trial_length, DEFAULT_NUM_CONNECTIONS)
         metrics_dict = parse_wrk_decoded_stdout(decoded_out)
         final_result.append(metrics_dict)
-    
+
     print(final_result)
+
 
 if __name__ == "__main__":
     main()

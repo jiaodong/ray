@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import re
 
+
 def parse_wrk_decoded_stdout(decoded_out):
     """
     Parse decoded wrk stdout to a dictionary.
@@ -17,8 +18,12 @@ def parse_wrk_decoded_stdout(decoded_out):
     # Transfer/sec:    212.16KB
 
     Returns:
-        metrics_dict (Dict[str, str]): 
-
+        metrics_dict (Dict[str, str]):
+            {'latency_avg': '66.57ms', 'latency_stdev': '4.47ms',
+             'latency_max': '113.34ms', 'latency_+/-_stdev': '91.33%',
+             'req/sec_avg': '180.88', 'req/sec_stdev': '26.83',
+             'req/sec_max': '323.00', 'req/sec_+/-_stdev': '65.22%',
+             'requests/sec': '1440.06', 'transfer/sec': '216.57KB'}
     """
     metrics_dict = {}
     for line in decoded_out.splitlines():
@@ -37,5 +42,5 @@ def parse_wrk_decoded_stdout(decoded_out):
             metrics_dict["requests/sec"] = parsed[1]
         elif parsed[0] == "Transfer/sec:":
             metrics_dict["transfer/sec"] = parsed[1]
-    
+
     return metrics_dict
