@@ -7,6 +7,7 @@ class ExecutionMode(Enum):
     LOCAL = 1
     TASKS = 2
     ACTORS = 3
+    DEPLOYMENT = 4
 
 
 def str_to_execution_mode(s: str) -> ExecutionMode:
@@ -16,6 +17,8 @@ def str_to_execution_mode(s: str) -> ExecutionMode:
         return ExecutionMode.TASKS
     elif s in ["ACTORS", "actors"]:
         return ExecutionMode.ACTORS
+    elif s in ["DEPLOYMENT", "deployment"]:
+        return ExecutionMode.DEPLOYMENT
     else:
         valid_strs = [str(mode).split(".")[1] for mode in ExecutionMode]
         raise ValueError(f"Unknown ExecutionMode str: '{s}'. "
