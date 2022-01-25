@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 @client_mode_hook(auto_init=False)
 def method(*args, **kwargs):
     """Annotate an actor method.
-
+    hello
     .. code-block:: python
 
         @ray.remote
