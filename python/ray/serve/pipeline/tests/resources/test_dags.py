@@ -3,9 +3,11 @@ from ray.serve.pipeline.tests.resources.test_modules import (
     Combine,
     combine,
     NESTED_HANDLE_KEY,
+    class_factory,
     request_to_data_int,
     request_to_data_obj,
 )
+import ray
 from ray.serve.pipeline.pipeline_input_node import PipelineInputNode
 
 
@@ -60,5 +62,16 @@ def get_multi_instantiation_class_nested_deployment_arg_dag():
         m2 = Model.bind(3)
         combine = Combine.bind(m1, m2={NESTED_HANDLE_KEY: m2}, m2_nested=True)
         ray_dag = combine.__call__.bind(dag_input)
+
+    return ray_dag, dag_input
+
+
+def get_inline_class_factory_dag():
+    with PipelineInputNode(preprocessor=request_to_data_int) as dag_input:
+        # inline returned class that is not suitable for prod deployment, but
+        # not enforced for local testing
+        inline_counter = ray.remote(class_factory()).bind()
+        inline_counter.inc.bind(dag_input)
+        ray_dag = inline_counter.get.bind()
 
     return ray_dag, dag_input

@@ -100,7 +100,7 @@ def test_non_json_serializable_args():
             "deployment need to be JSON serializable."
         ),
     ):
-        _ = json.dumps(ray_dag, cls=DAGNodeEncoder)
+        _ = json.dumps(ray_dag, cls=DAGNodeEncoder, dev_mode=True)
     # User actionable item
     with pytest.raises(
         TypeError,

@@ -1,4 +1,10 @@
+from importlib import import_module
+import json
+from typing import Any, Dict, List, Optional, Tuple
+import base64
+
 import ray
+import ray.cloudpickle as pickle
 from ray.experimental.dag.dag_node import DAGNode
 from ray.experimental.dag.input_node import InputNode
 from ray.experimental.dag.format_utils import get_dag_node_str
@@ -7,8 +13,7 @@ from ray.experimental.dag.constants import (
     PREV_CLASS_METHOD_CALL_KEY,
     DAGNODE_TYPE_KEY,
 )
-
-from typing import Any, Dict, List, Optional, Tuple
+from ray.serve.utils import parse_import_path
 
 
 class ClassNode(DAGNode):
@@ -94,23 +99,31 @@ class ClassNode(DAGNode):
     def to_json(self, encoder_cls) -> Dict[str, Any]:
         json_dict = super().to_json_base(encoder_cls, ClassNode.__name__)
         import_path = self.get_import_path()
-        error_message = (
-            "Class used in DAG should not be in-line defined when exporting"
-            "import path for deployment. Please ensure it has fully "
-            "qualified name with valid __module__ and __qualname__ for "
-            "import path, with no __main__ or <locals>. \n"
-            f"Current import path: {import_path}"
-        )
-        assert "__main__" not in import_path, error_message
-        assert "<locals>" not in import_path, error_message
+        if "__main__" in import_path or "<locals>" in import_path:
+            # Best effort to get FQN string import path
+            json_dict["import_path"] = base64.b64encode(
+                pickle.dumps(self._body)
+            ).decode()
+        else:
+            json_dict["import_path"] = import_path
 
-        json_dict["import_path"] = import_path
         return json_dict
 
     @classmethod
-    def from_json(cls, input_json, module, object_hook=None):
+    def from_json(cls, input_json, object_hook=None):
         assert input_json[DAGNODE_TYPE_KEY] == ClassNode.__name__
         args_dict = super().from_json_base(input_json, object_hook=object_hook)
+
+        import_path = input_json["import_path"]
+        module = import_path
+        if isinstance(import_path, bytes):
+            # In dev mode we store pickled class or function body in import_path
+            # if we failed to get a FQN import path for it.
+            module = pickle.loads(base64.b64decode(json.loads(import_path)))
+        else:
+            module_name, attr_name = parse_import_path(import_path)
+            module = getattr(import_module(module_name), attr_name)
+
         node = cls(
             module.__ray_metadata__.modified_class,
             args_dict["args"],
@@ -220,14 +233,24 @@ class ClassMethodNode(DAGNode):
     def get_method_name(self) -> str:
         return self._method_name
 
+    def get_body(self):
+        return self._parent_class_node._body.__ray_actor_class__
+
     def get_import_path(self) -> str:
-        body = self._parent_class_node._body.__ray_actor_class__
+        body = self.get_body()
         return f"{body.__module__}.{body.__qualname__}"
 
     def to_json(self, encoder_cls) -> Dict[str, Any]:
         json_dict = super().to_json_base(encoder_cls, ClassMethodNode.__name__)
         json_dict["method_name"] = self.get_method_name()
-        json_dict["import_path"] = self.get_import_path()
+        import_path = self.get_import_path()
+        if "__main__" in import_path or "<locals>" in import_path:
+            # Best effort to get FQN string import path
+            json_dict["import_path"] = base64.b64encode(
+                pickle.dumps(self.get_body())
+            ).decode()
+        else:
+            json_dict["import_path"] = import_path
         return json_dict
 
     @classmethod

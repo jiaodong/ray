@@ -1,8 +1,8 @@
 from typing import Any, Union
-from importlib import import_module
-
+import base64
 import json
 
+import ray.cloudpickle as pickle
 from ray.experimental.dag import (
     DAGNode,
     ClassNode,
@@ -15,7 +15,6 @@ from ray.experimental.dag import (
 from ray.serve.pipeline.deployment_node import DeploymentNode
 from ray.serve.pipeline.deployment_method_node import DeploymentMethodNode
 from ray.serve.pipeline.pipeline_input_node import PipelineInputNode
-from ray.serve.utils import parse_import_path
 from ray.serve.handle import RayServeHandle
 from ray.serve.utils import ServeHandleEncoder, serve_handle_object_hook
 from ray.serve.constants import SERVE_HANDLE_JSON_KEY
@@ -47,18 +46,12 @@ class DAGNodeEncoder(json.JSONEncoder):
         # For all other DAGNode types.
         if isinstance(obj, DAGNode):
             return obj.to_json(DAGNodeEncoder)
+        # # In local dev mode we don't enforce JSON serialization or module with
+        # # FQN import path
+        # if isinstance(obj, bytes):
+        #     return obj
         else:
-            # Let the base class default method raise the TypeError
-            try:
-                return json.JSONEncoder.default(self, obj)
-            except Exception as e:
-                raise TypeError(
-                    "All args and kwargs used in Ray DAG building for serve "
-                    "deployment need to be JSON serializable. Please JSON "
-                    "serialize your args to make your ray application "
-                    "deployment ready."
-                    f"\n Original exception message: {e}"
-                )
+            return json.JSONEncoder.default(self, obj)
 
 
 def dagnode_from_json(input_json: Any) -> Union[DAGNode, RayServeHandle, Any]:
@@ -84,33 +77,36 @@ def dagnode_from_json(input_json: Any) -> Union[DAGNode, RayServeHandle, Any]:
         return json.loads(input_json, object_hook=serve_handle_object_hook)
     # Base case for plain objects
     elif DAGNODE_TYPE_KEY not in input_json:
-        try:
-            return json.loads(input_json)
-        except Exception:
-            return input_json
+        if isinstance(input_json, bytes):
+            return pickle.loads(base64.b64decode(json.loads(input_json)))
+        else:
+            try:
+                rst = json.loads(input_json)
+                # To facilitate local dev we don't enforce args JSON
+                # serialization or FQN import path in dev mode, only enforced
+                # on last deployment step app.to_yaml()
+                if isinstance(rst, bytes):
+                    return pickle.loads(base64.b64decode(rst))
+                else:
+                    return rst
+            except Exception:
+                return input_json
     # Deserialize DAGNode type
     elif input_json[DAGNODE_TYPE_KEY] == InputNode.__name__:
         return InputNode.from_json(input_json, object_hook=dagnode_from_json)
     elif input_json[DAGNODE_TYPE_KEY] == InputAtrributeNode.__name__:
         return InputAtrributeNode.from_json(input_json, object_hook=dagnode_from_json)
-    elif input_json[DAGNODE_TYPE_KEY] == PipelineInputNode.__name__:
-        return PipelineInputNode.from_json(input_json, object_hook=dagnode_from_json)
     elif input_json[DAGNODE_TYPE_KEY] == ClassMethodNode.__name__:
         return ClassMethodNode.from_json(input_json, object_hook=dagnode_from_json)
     elif input_json[DAGNODE_TYPE_KEY] == DeploymentNode.__name__:
         return DeploymentNode.from_json(input_json, object_hook=dagnode_from_json)
     elif input_json[DAGNODE_TYPE_KEY] == DeploymentMethodNode.__name__:
         return DeploymentMethodNode.from_json(input_json, object_hook=dagnode_from_json)
+    elif input_json[DAGNODE_TYPE_KEY] == FunctionNode.__name__:
+        return FunctionNode.from_json(input_json, object_hook=dagnode_from_json)
+    elif input_json[DAGNODE_TYPE_KEY] == ClassNode.__name__:
+        return ClassNode.from_json(input_json, object_hook=dagnode_from_json)
+    elif input_json[DAGNODE_TYPE_KEY] == PipelineInputNode.__name__:
+        return PipelineInputNode.from_json(input_json, object_hook=dagnode_from_json)
     else:
-        # Class and Function nodes require original module as body.
-        print(f"import_path: {input_json['import_path']}")
-        module_name, attr_name = parse_import_path(input_json["import_path"])
-        module = getattr(import_module(module_name), attr_name)
-        if input_json[DAGNODE_TYPE_KEY] == FunctionNode.__name__:
-            return FunctionNode.from_json(
-                input_json, module, object_hook=dagnode_from_json
-            )
-        elif input_json[DAGNODE_TYPE_KEY] == ClassNode.__name__:
-            return ClassNode.from_json(
-                input_json, module, object_hook=dagnode_from_json
-            )
+        raise ValueError(f"No JSON deserializer available for input: {input_json}")

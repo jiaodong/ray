@@ -1,8 +1,12 @@
 from typing import Any, Callable, Dict, List, Union, Optional
+import base64
+from importlib import import_module
 
+import ray.cloudpickle as pickle
 from ray.experimental.dag import InputNode
 from ray.experimental.dag.format_utils import get_dag_node_str
 from ray.experimental.dag.constants import DAGNODE_TYPE_KEY
+from ray.serve.utils import parse_import_path
 
 
 class PipelineInputNode(InputNode):
@@ -50,11 +54,6 @@ class PipelineInputNode(InputNode):
         self._preprocessor = preprocessor
         # Create InputNode instance
         super().__init__(_other_args_to_resolve=_other_args_to_resolve)
-        # Need to set in other args to resolve in order to carry the context
-        # throughout dag node replacement and json serde
-        self._bound_other_args_to_resolve[
-            "preprocessor_import_path"
-        ] = self.get_preprocessor_import_path()
 
     def _copy_impl(
         self,
@@ -69,7 +68,10 @@ class PipelineInputNode(InputNode):
         )
 
     def __str__(self) -> str:
-        return get_dag_node_str(self, f"Preprocessor: {str(self._preprocessor)}")
+        return get_dag_node_str(self, str(self.get_preprocessor_import_path()))
+
+    def get_body(self):
+        return self._preprocessor
 
     def get_preprocessor_import_path(self) -> Optional[str]:
         if isinstance(self._preprocessor, str):
@@ -77,29 +79,40 @@ class PipelineInputNode(InputNode):
             # is the resolved import path.
             return self._preprocessor
         else:
-            return f"{self._preprocessor.__module__}.{self._preprocessor.__qualname__}"
+            return f"{self.get_body().__module__}.{self.get_body().__qualname__}"
 
     def to_json(self, encoder_cls) -> Dict[str, Any]:
         json_dict = super().to_json_base(encoder_cls, PipelineInputNode.__name__)
         preprocessor_import_path = self.get_preprocessor_import_path()
-        error_message = (
-            "Preprocessor used in DAG should not be in-line defined when "
-            "exporting import path for deployment. Please ensure it has fully "
-            "qualified name with valid __module__ and __qualname__ for "
-            "import path, with no __main__ or <locals>. \n"
-            f"Current import path: {preprocessor_import_path}"
-        )
-        assert "__main__" not in preprocessor_import_path, error_message
-        assert "<locals>" not in preprocessor_import_path, error_message
-
+        if (
+            "__main__" in preprocessor_import_path
+            or "<locals>" in preprocessor_import_path
+        ):
+            # Best effort to get FQN string import path
+            json_dict["import_path"] = base64.b64encode(
+                pickle.dumps(self.get_body())
+            ).decode()
+        else:
+            json_dict["import_path"] = preprocessor_import_path
         return json_dict
 
     @classmethod
     def from_json(cls, input_json, object_hook=None):
         assert input_json[DAGNODE_TYPE_KEY] == PipelineInputNode.__name__
         args_dict = super().from_json_base(input_json, object_hook=object_hook)
+        import_path = input_json["import_path"]
+        preprocessor = import_path
+
+        try:
+            # In dev mode we store pickled class or function body in import_path
+            # if we failed to get a FQN import path for it.
+            preprocessor = pickle.loads(base64.b64decode(import_path))
+        except Exception:
+            module_name, attr_name = parse_import_path(input_json["import_path"])
+            preprocessor = getattr(import_module(module_name), attr_name)
+
         node = cls(
-            args_dict["other_args_to_resolve"]["preprocessor_import_path"],
+            preprocessor,
             _other_args_to_resolve=args_dict["other_args_to_resolve"],
         )
         node._stable_uuid = input_json["uuid"]
