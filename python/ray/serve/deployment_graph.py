@@ -14,8 +14,10 @@ class RayServeDAGHandle:
     """
 
     def __init__(self, dag_node_json: str) -> None:
-
+        # TODO (jiaodong): Resolve circular dependency
+        from ray.serve.pipeline.json_serde import dagnode_from_json
         self.dag_node_json = dag_node_json
+        self.dagnode_from_json = dagnode_from_json
 
         # NOTE(simon): Making this lazy to avoid deserialization in controller for now
         # This would otherwise hang because it's trying to get handles from within
@@ -31,11 +33,9 @@ class RayServeDAGHandle:
         return RayServeDAGHandle._deserialize, (self.dag_node_json,)
 
     def remote(self, *args, **kwargs):
-        from ray.serve.pipeline.json_serde import dagnode_from_json
-
         if self.dag_node is None:
             self.dag_node = json.loads(
-                self.dag_node_json, object_hook=dagnode_from_json
+                self.dag_node_json, object_hook=self.dagnode_from_json
             )
         return self.dag_node.execute(*args, **kwargs)
 

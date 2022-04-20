@@ -15,6 +15,7 @@ from ray.experimental.dag import (
 from ray.serve.pipeline.deployment_node import DeploymentNode
 from ray.serve.pipeline.deployment_method_node import DeploymentMethodNode
 from ray.serve.pipeline.deployment_function_node import DeploymentFunctionNode
+from ray.serve.pipeline.minimal_deployment_node import MinimalDeploymentNode
 from ray.serve.schema import (
     DeploymentSchema,
 )
@@ -125,6 +126,17 @@ def dagnode_from_json(input_json: Any) -> Union[DAGNode, RayServeHandle, Any]:
                 that we perserve the same parent node.
         - .options() does not contain any DAGNode type
     """
+    # Support DAGNode class types with simple dispatch
+    dispatch_table = {
+        InputNode.__name__: InputNode,
+        InputAtrributeNode.__name__: InputAtrributeNode,
+        ClassMethodNode.__name__: ClassMethodNode,
+        DeploymentNode.__name__: DeploymentNode,
+        DeploymentMethodNode.__name__: DeploymentMethodNode,
+        DeploymentFunctionNode.__name__: DeploymentFunctionNode,
+        MinimalDeploymentNode.__name__: MinimalDeploymentNode,
+    }
+
     # Deserialize RayServeHandle type
     if SERVE_HANDLE_JSON_KEY in input_json:
         return serve_handle_from_json_dict(input_json)
@@ -141,20 +153,13 @@ def dagnode_from_json(input_json: Any) -> Union[DAGNode, RayServeHandle, Any]:
             HandleOptions(input_json["handle_options_method_name"]),
         )
     # Deserialize DAGNode type
-    elif input_json[DAGNODE_TYPE_KEY] == InputNode.__name__:
-        return InputNode.from_json(input_json)
-    elif input_json[DAGNODE_TYPE_KEY] == InputAtrributeNode.__name__:
-        return InputAtrributeNode.from_json(input_json)
-    elif input_json[DAGNODE_TYPE_KEY] == ClassMethodNode.__name__:
-        return ClassMethodNode.from_json(input_json)
-    elif input_json[DAGNODE_TYPE_KEY] == DeploymentNode.__name__:
-        return DeploymentNode.from_json(input_json)
-    elif input_json[DAGNODE_TYPE_KEY] == DeploymentMethodNode.__name__:
-        return DeploymentMethodNode.from_json(input_json)
-    elif input_json[DAGNODE_TYPE_KEY] == DeploymentFunctionNode.__name__:
-        return DeploymentFunctionNode.from_json(input_json)
+    elif input_json[DAGNODE_TYPE_KEY] in dispatch_table.keys():
+        cls = dispatch_table.get(input_json[DAGNODE_TYPE_KEY])
+        return cls.from_json(input_json)
     else:
         # Class and Function nodes require original module as body.
+        # also parse_import_path is in serve that we don't want to upstream
+        # to ray dag implementation.
         module_name, attr_name = parse_import_path(input_json["import_path"])
         module = getattr(import_module(module_name), attr_name)
         if input_json[DAGNODE_TYPE_KEY] == FunctionNode.__name__:

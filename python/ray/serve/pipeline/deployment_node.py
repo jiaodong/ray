@@ -6,6 +6,7 @@ from ray.experimental.dag import DAGNode, InputNode
 from ray.serve.handle import RayServeLazySyncHandle, RayServeSyncHandle, RayServeHandle
 from ray.serve.pipeline.deployment_method_node import DeploymentMethodNode
 from ray.serve.pipeline.deployment_function_node import DeploymentFunctionNode
+from ray.serve.pipeline.minimal_deployment_node import MinimalDeploymentNode
 from ray.serve.pipeline.constants import USE_SYNC_HANDLE_KEY
 from ray.experimental.dag.constants import DAGNODE_TYPE_KEY
 from ray.experimental.dag.format_utils import get_dag_node_str
@@ -64,6 +65,9 @@ class DeploymentNode(DAGNode):
 
                 serve_dag_root_json = json.dumps(node, cls=DAGNodeEncoder)
                 return RayServeDAGHandle(serve_dag_root_json)
+            elif isinstance(node, MinimalDeploymentNode):
+                # Skip if deployment node is already replaced by minimal one
+                return node
 
         (
             replaced_deployment_init_args,
@@ -71,7 +75,7 @@ class DeploymentNode(DAGNode):
         ) = self.apply_functional(
             [deployment_init_args, deployment_init_kwargs],
             predictate_fn=lambda node: isinstance(
-                node, (DeploymentNode, DeploymentMethodNode, DeploymentFunctionNode)
+                node, (DeploymentNode, DeploymentMethodNode, DeploymentFunctionNode, MinimalDeploymentNode)
             ),
             apply_fn=replace_with_handle,
         )
@@ -226,9 +230,9 @@ class DeploymentNode(DAGNode):
         }
 
     @classmethod
-    def from_json(cls, input_json, object_hook=None):
+    def from_json(cls, input_json):
         assert input_json[DAGNODE_TYPE_KEY] == DeploymentNode.__name__
-        return cls(
+        node = cls(
             input_json["import_path"],
             input_json["deployment_name"],
             input_json["args"],
@@ -236,3 +240,5 @@ class DeploymentNode(DAGNode):
             input_json["options"],
             other_args_to_resolve=input_json["other_args_to_resolve"],
         )
+        node._stable_uuid = input_json["uuid"]
+        return node

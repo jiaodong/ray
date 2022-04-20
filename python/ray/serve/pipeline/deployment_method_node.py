@@ -136,7 +136,7 @@ class DeploymentMethodNode(DAGNode):
         }
 
     @classmethod
-    def from_json(cls, input_json, object_hook=None):
+    def from_json(cls, input_json):
         assert input_json[DAGNODE_TYPE_KEY] == DeploymentMethodNode.__name__
         return cls(
             Deployment(

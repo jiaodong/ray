@@ -14,6 +14,7 @@ from ray.serve.deployment import Deployment
 from ray.serve.pipeline.deployment_method_node import DeploymentMethodNode
 from ray.serve.pipeline.deployment_node import DeploymentNode
 from ray.serve.pipeline.deployment_function_node import DeploymentFunctionNode
+from ray.serve.pipeline.minimal_deployment_node import MinimalDeploymentNode
 
 
 class DeploymentNameGenerator(object):
@@ -34,7 +35,8 @@ class DeploymentNameGenerator(object):
         )
         with cls.__lock:
             deployment_name = (
-                dag_node.get_options().get("name", None) or dag_node._body.__name__
+                dag_node.get_options().get("name", None)
+                or dag_node._body.__name__
             )
             if deployment_name not in cls.__shared_state:
                 cls.__shared_state[deployment_name] = 0
@@ -89,7 +91,6 @@ def transform_ray_dag_to_serve_dag(dag_node):
             # TODO: (jiaodong) Support .options(metadata=xxx) for deployment
             other_args_to_resolve=dag_node.get_other_args_to_resolve(),
         )
-
     elif isinstance(dag_node, ClassMethodNode):
         other_args_to_resolve = dag_node.get_other_args_to_resolve()
         # TODO: (jiaodong) Need to capture DAGNodes in the parent node
@@ -148,6 +149,45 @@ def extract_deployments_from_serve_dag(
     serve_dag_root.apply_recursive(extractor)
 
     return list(deployments.values())
+
+
+def generate_minimal_json_serve_dag(serve_dag_node: DAGNode):
+    """After we're done with transforming ray dag to serve dag, create and
+    replace init args for Deployment objects needed, registered deployment
+    nodes we need in serve, generate an equivalent serve dag that only
+    refers to deployment and method by name to keep the JSON serialization
+    minimal.
+
+    Ideally -- we can even see the DAG structure by reading it.
+    """
+
+    print(f"Generating .. >>>> {serve_dag_node}")
+
+    if isinstance(serve_dag_node, DeploymentNode):
+        print(f">>>> Replacing {serve_dag_node.get_deployment_name()}")
+        return MinimalDeploymentNode(
+            serve_dag_node.get_args(),
+            serve_dag_node.get_kwargs(),
+            serve_dag_node.get_deployment_name(),
+        )
+    elif isinstance(serve_dag_node, DeploymentFunctionNode):
+        print(f">>>> Replacing {serve_dag_node.get_deployment_name()}")
+        return MinimalDeploymentNode(
+            serve_dag_node.get_args(),
+            serve_dag_node.get_kwargs(),
+            serve_dag_node.get_deployment_name(),
+        )
+    elif isinstance(serve_dag_node, DeploymentMethodNode):
+        print(f">>>> Replacing {serve_dag_node.get_deployment_name()}")
+        print(f">>>> Replacing {serve_dag_node.get_deployment_method_name()}")
+        return MinimalDeploymentNode(
+            serve_dag_node.get_args(),
+            serve_dag_node.get_kwargs(),
+            serve_dag_node.get_deployment_name(),
+            deployment_method_name=serve_dag_node.get_deployment_method_name(),
+        )
+    else:
+        return serve_dag_node
 
 
 def get_pipeline_input_node(serve_dag_root_node: DAGNode):
